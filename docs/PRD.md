@@ -1,4 +1,4 @@
-Problem: An AI tool that generates compelling, conversion-ready property listing copy for Southeast Asian real estate agents, in English, Chinese and Bahasa Malaysia, from basic property details entered in under 2 minutes.
+Problem: An AI tool that generates compelling, conversion-ready property listing copy for Southeast Asian real estate agents, in English, Simplified Chinese and Bahasa Malaysia, from basic property details entered in under 2 minutes.
 For: Real estate agents and negotiators in Malaysia, Singapore, and Indonesia, especially agents of IQI, PropNex, and independent agents who post listings on Facebook, PropertyGuru, and WhatsApp daily.
 Core things to track: Property listings generated, copy variants per listing, language output selected (English / Bahasa / Chinese), agent account, and monthly usage count for billing tier enforcement.
 The one workflow (must work v1): Agent fills in property details → AI generates 3 listing copy variants (Facebook caption, WhatsApp pitch, PropertyGuru description) → agent copies and uses immediately.
