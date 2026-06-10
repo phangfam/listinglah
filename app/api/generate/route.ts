@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
+import { FREE_LIMIT } from "@/app/api/usage/route";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -41,7 +42,7 @@ function buildPrompt(listing: ListingInput): string {
     listing.bathrooms ? `${listing.bathrooms} bathrooms` : null,
     listing.builtUpSqft ? `${listing.builtUpSqft} sqft built-up` : null,
     listing.landAreaSqft ? `${listing.landAreaSqft} sqft land area` : null,
-    listing.furnishing ? `${listing.furnishing}` : null,
+    listing.furnishing ?? null,
     listing.tenure ? `${listing.tenure} tenure` : null,
   ]
     .filter(Boolean)
@@ -85,10 +86,44 @@ For Bahasa Malaysia (bm): use natural, professional Malaysian BM as spoken in pr
 For Simplified Chinese (zh): use mainland-style Simplified Chinese characters, clear and professional, suited for Malaysian Chinese property buyers.`;
 }
 
+async function getOrCreateSession(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  sessionId: string
+): Promise<{ count: number; isPaid: boolean }> {
+  const { data } = await supabase
+    .from("usage_sessions")
+    .select("generation_count, is_paid")
+    .eq("id", sessionId)
+    .maybeSingle();
+
+  if (!data) {
+    await supabase
+      .from("usage_sessions")
+      .insert({ id: sessionId, generation_count: 0, is_paid: false });
+    return { count: 0, isPaid: false };
+  }
+  return { count: data.generation_count, isPaid: data.is_paid };
+}
+
+async function incrementSession(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  sessionId: string,
+  currentCount: number
+) {
+  await supabase
+    .from("usage_sessions")
+    .update({
+      generation_count: currentCount + 1,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", sessionId);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const listing: ListingInput = body;
+    const { sessionId, ...listingBody } = body as { sessionId?: string } & ListingInput;
+    const listing: ListingInput = listingBody;
 
     if (!listing.location || !listing.propertyType) {
       return NextResponse.json(
@@ -104,33 +139,40 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const supabase = await createClient();
+
+    // Enforce free tier limit
+    let sessionCount = 0;
+    if (sessionId) {
+      const { count, isPaid } = await getOrCreateSession(supabase, sessionId);
+      if (!isPaid && count >= FREE_LIMIT) {
+        return NextResponse.json({ limitReached: true }, { status: 402 });
+      }
+      sessionCount = count;
+    }
+
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 4096,
-      messages: [
-        {
-          role: "user",
-          content: buildPrompt(listing),
-        },
-      ],
+      messages: [{ role: "user", content: buildPrompt(listing) }],
     });
 
     const raw = message.content[0];
-    if (raw.type !== "text") {
-      throw new Error("Unexpected response type from Claude");
-    }
+    if (raw.type !== "text") throw new Error("Unexpected response type from Claude");
 
-    // Strip markdown code fences if present
     const cleaned = raw.text.replace(/^```json\n?|```$/gm, "").trim();
     const generated: GeneratedCopy = JSON.parse(cleaned);
 
-    // Persist to Supabase
-    const supabase = await createClient();
+    // Increment session count after successful generation
+    if (sessionId) {
+      await incrementSession(supabase, sessionId, sessionCount);
+    }
 
+    // Persist listing + copies
     const { data: listingRow, error: listingErr } = await supabase
       .from("listings")
       .insert({
-        session_id: body.sessionId ?? null,
+        session_id: sessionId ?? null,
         property_type: listing.propertyType,
         bedrooms: listing.bedrooms ?? null,
         bathrooms: listing.bathrooms ?? null,
@@ -146,7 +188,6 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (listingErr) {
-      // Non-fatal: return generated copy even if DB save fails
       console.error("Failed to save listing:", listingErr.message);
       return NextResponse.json({ generated });
     }
