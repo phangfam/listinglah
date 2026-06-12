@@ -99,7 +99,12 @@ propertyguru_description (220-350 words, NO emojis):
 LANGUAGE NOTES:
 - English (en): Natural, confident Malaysian English. Not British-formal, not American-casual.
 - Bahasa Malaysia (bm): Conversational Malaysian BM as used in property ads and agent WhatsApp groups — warm but credible. Avoid stiff textbook BM.
-- Simplified Chinese (zh): Write as a Malaysian Chinese agent would — mix of genuine warmth and practical value-focus. Use 简体字. Avoid overly formal or mainland-government tone. The WhatsApp pitch should feel like a WeChat message from someone you trust.`;
+- Simplified Chinese (zh): Write as a Malaysian Chinese agent would — mix of genuine warmth and practical value-focus. Use 简体字. Avoid overly formal or mainland-government tone. The WhatsApp pitch should feel like a WeChat message from someone you trust.
+
+CRITICAL JSON RULES (the output must parse with JSON.parse):
+- All line breaks within copy text MUST be represented as the two-character sequence \\n — never a literal newline character inside a JSON string value.
+- Never use unescaped double-quote characters inside string values — use a single apostrophe instead (e.g. you're, it's, don't).
+- Output raw JSON only — no markdown fences, no commentary before or after.`;
 }
 
 async function getOrCreateSession(
@@ -176,7 +181,12 @@ export async function POST(req: NextRequest) {
     const raw = message.content[0];
     if (raw.type !== "text") throw new Error("Unexpected response type from Claude");
 
-    const cleaned = raw.text.replace(/^```json\n?|```$/gm, "").trim();
+    const stripped = raw.text.replace(/^```json\n?|```$/gm, "").trim();
+    // Repair literal newlines inside JSON string values (model occasionally emits them)
+    const cleaned = stripped.replace(
+      /"((?:[^"\\]|\\.)*)"/g,
+      (_, inner) => `"${inner.replace(/\n/g, "\\n").replace(/\r/g, "")}"`
+    );
     const generated: GeneratedCopy = JSON.parse(cleaned);
 
     // Increment session count after successful generation
