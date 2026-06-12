@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { jsonrepair } from "jsonrepair";
 import { createClient } from "@/lib/supabase/server";
 import { FREE_LIMIT } from "@/app/api/usage/route";
 
@@ -182,12 +183,7 @@ export async function POST(req: NextRequest) {
     if (raw.type !== "text") throw new Error("Unexpected response type from Claude");
 
     const stripped = raw.text.replace(/^```json\n?|```$/gm, "").trim();
-    // Repair literal newlines inside JSON string values (model occasionally emits them)
-    const cleaned = stripped.replace(
-      /"((?:[^"\\]|\\.)*)"/g,
-      (_, inner) => `"${inner.replace(/\n/g, "\\n").replace(/\r/g, "")}"`
-    );
-    const generated: GeneratedCopy = JSON.parse(cleaned);
+    const generated: GeneratedCopy = JSON.parse(jsonrepair(stripped));
 
     // Increment session count after successful generation
     if (sessionId) {
