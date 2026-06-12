@@ -48,7 +48,7 @@ function buildPrompt(listing: ListingInput): string {
     .filter(Boolean)
     .join(", ");
 
-  return `You are an expert real estate copywriter for Southeast Asian markets (Malaysia, Singapore, Indonesia). Generate compelling, conversion-ready property listing copy.
+  return `You are a top-performing Malaysian property agent who also writes killer copy. You write like a real human — punchy, warm, and persuasive — never like a brochure or a robot.
 
 PROPERTY DETAILS:
 - Type: ${listing.propertyType}
@@ -78,12 +78,28 @@ Generate listing copy in 3 languages (English, Bahasa Malaysia, Simplified Chine
 }
 
 FORMAT REQUIREMENTS:
-- facebook_caption: 150-220 words, attention-grabbing headline, relevant emojis, key specs, price, strong call to action (DM/WhatsApp). Optimised for Facebook property groups.
-- whatsapp_pitch: 60-90 words, conversational and warm, perfect for copy-pasting into WhatsApp to a prospect. No emojis. End with "Interested? Let me know!"
-- propertyguru_description: 200-350 words, professional, SEO-friendly, detailed. Cover property features, location benefits, investment value, and lifestyle. No emojis.
 
-For Bahasa Malaysia (bm): use natural, professional Malaysian BM as spoken in property ads — not overly formal.
-For Simplified Chinese (zh): use mainland-style Simplified Chinese characters, clear and professional, suited for Malaysian Chinese property buyers.`;
+facebook_caption (150-220 words total, with emojis):
+- Line 1: A single bold emotional hook — a desire, fear, or dream the buyer has. NOT a feature list. Make it feel like it was written for one specific person scrolling their feed at 11pm. Example style: "Still paying rent while watching prices climb? This one might change that." Use the actual property and location to make it specific.
+- Line 2: The payoff — one vivid sentence about what life looks like owning this property. Make it aspirational.
+- Line 3: One sharp, concrete fact that makes the deal real (price per sqft, proximity to something important, or a scarcity signal).
+- Then: specs, key highlights, price, and a CTA to DM or WhatsApp. Use emojis naturally — not as decoration on every line.
+
+whatsapp_pitch (55-80 words, NO emojis):
+- Write as if you are personally texting a warm lead you met at an open house. Natural, friendly, direct.
+- Mention one specific thing that makes this property worth their time — not a list of specs.
+- End with a yes-or-yes closing question that offers two timing options, e.g. "Would this weekend or early next week work better for a viewing?" (English), "Awak free hujung minggu ni atau minggu depan untuk tengok?" (BM), "您方便这个周末还是下周来看看？" (ZH). Tailor the question naturally to the language and tone.
+
+propertyguru_description (220-350 words, NO emojis):
+- Open with ONE strong sentence that earns the reader's attention — a lifestyle image, a market insight, or a bold claim specific to this property. Do NOT start with the property type and location like a form letter.
+- Then cover: property highlights, room/space details, building/development features, location and connectivity, lifestyle and amenities, investment or ownership angle.
+- Close with a confident CTA (call/WhatsApp to arrange viewing).
+- Professional tone, but written by a human who knows the area — not a template.
+
+LANGUAGE NOTES:
+- English (en): Natural, confident Malaysian English. Not British-formal, not American-casual.
+- Bahasa Malaysia (bm): Conversational Malaysian BM as used in property ads and agent WhatsApp groups — warm but credible. Avoid stiff textbook BM.
+- Simplified Chinese (zh): Write as a Malaysian Chinese agent would — mix of genuine warmth and practical value-focus. Use 简体字. Avoid overly formal or mainland-government tone. The WhatsApp pitch should feel like a WeChat message from someone you trust.`;
 }
 
 async function getOrCreateSession(
