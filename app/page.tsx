@@ -99,8 +99,9 @@ function UsagePill({
       </button>
     );
   }
+  const color = remaining === 1 ? "text-amber-600 border-amber-200 bg-amber-50" : "text-gray-500 border-gray-200 bg-white";
   return (
-    <span className="text-xs text-gray-500 border border-gray-200 bg-white px-3 py-1.5 rounded-full">
+    <span className={`text-xs px-3 py-1.5 rounded-full border font-medium ${color}`}>
       {remaining} free {remaining === 1 ? "generation" : "generations"} left
     </span>
   );
@@ -212,7 +213,7 @@ function UpgradeModal({ onClose, sessionId }: { onClose: () => void; sessionId: 
           disabled={loading}
           className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 text-white font-bold py-3.5 rounded-2xl transition-colors text-sm tracking-wide shadow-lg shadow-emerald-200"
         >
-          {loading ? "Redirecting…" : "Subscribe — RM49 / month"}
+          {loading ? "Redirecting…" : "Subscribe — RM29 / month"}
         </button>
 
         <button
@@ -415,35 +416,34 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="pt-1">
-                {!isPaid && usageCount >= FREE_LIMIT ? (
+              <div className="pt-1 space-y-3">
+                {!isPaid && usageCount >= FREE_LIMIT && (
                   <button
                     type="button"
                     onClick={() => setShowUpgrade(true)}
-                    className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-2xl transition-colors text-[15px] tracking-wide shadow-lg shadow-amber-200"
+                    className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 rounded-2xl transition-colors text-sm tracking-wide shadow-lg shadow-amber-200"
                   >
-                    Upgrade to Pro to Generate More ↗
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl text-[15px] tracking-wide shadow-[0_4px_20px_rgba(16,185,129,0.35)] hover:shadow-[0_6px_28px_rgba(16,185,129,0.45)] hover:-translate-y-px transition-all duration-150"
-                  >
-                    {loading ? (
-                      <span className="flex items-center justify-center gap-2.5">
-                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                        </svg>
-                        Writing your listing copy…
-                      </span>
-                    ) : (
-                      "✦ Generate Listing Copy"
-                    )}
+                    Upgrade to Pro for Unlimited ↗
                   </button>
                 )}
-                <p className="text-center text-[11px] text-gray-400 mt-3 tracking-wide">
+                <button
+                  type="submit"
+                  disabled={loading || (!isPaid && usageCount >= FREE_LIMIT)}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl text-[15px] tracking-wide shadow-[0_4px_20px_rgba(16,185,129,0.35)] hover:shadow-[0_6px_28px_rgba(16,185,129,0.45)] hover:-translate-y-px disabled:hover:translate-y-0 disabled:hover:shadow-[0_4px_20px_rgba(16,185,129,0.35)] transition-all duration-150"
+                >
+                  {loading ? (
+                    <span className="flex items-center justify-center gap-2.5">
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                      Writing your listing copy…
+                    </span>
+                  ) : (
+                    "✦ Generate Listing Copy"
+                  )}
+                </button>
+                <p className="text-center text-[11px] text-gray-400 tracking-wide">
                   9 copy variants &nbsp;·&nbsp; 3 languages &nbsp;·&nbsp; ready in ~10 seconds
                 </p>
               </div>
