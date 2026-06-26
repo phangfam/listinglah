@@ -10,15 +10,8 @@ const anthropic = new Anthropic({
 
 export interface ListingInput {
   propertyType: string;
-  bedrooms?: number;
-  bathrooms?: number;
-  builtUpSqft?: number;
-  landAreaSqft?: number;
-  furnishing?: string;
-  tenure?: string;
-  askingPriceMyr?: number;
   location: string;
-  highlights?: string;
+  propertyDetails?: string;
 }
 
 export interface CopyVariants {
@@ -34,29 +27,14 @@ export interface GeneratedCopy {
 }
 
 function buildPrompt(listing: ListingInput): string {
-  const priceStr = listing.askingPriceMyr
-    ? `RM ${listing.askingPriceMyr.toLocaleString()}`
-    : "price on request";
-
-  const specs = [
-    listing.bedrooms ? `${listing.bedrooms} bedrooms` : null,
-    listing.bathrooms ? `${listing.bathrooms} bathrooms` : null,
-    listing.builtUpSqft ? `${listing.builtUpSqft} sqft built-up` : null,
-    listing.landAreaSqft ? `${listing.landAreaSqft} sqft land area` : null,
-    listing.furnishing ?? null,
-    listing.tenure ? `${listing.tenure} tenure` : null,
-  ]
-    .filter(Boolean)
-    .join(", ");
-
   return `You are a top-performing Malaysian property agent who also writes killer copy. You write like a real human — punchy, warm, and persuasive — never like a brochure or a robot.
 
 PROPERTY DETAILS:
 - Type: ${listing.propertyType}
 - Location: ${listing.location}
-- Specs: ${specs || "N/A"}
-- Asking Price: ${priceStr}
-- Key Highlights: ${listing.highlights || "None provided"}
+- Details: ${listing.propertyDetails || "None provided"}
+
+Extract all relevant information from the Details field naturally — beds, baths, size, price, tenure, furnishing, views, special features, nearby amenities, etc. Use only what is present; do not invent facts not mentioned.
 
 Generate listing copy in 3 languages (English, Bahasa Malaysia, Simplified Chinese) and 3 formats each. Respond ONLY with valid JSON in this exact schema:
 
@@ -196,15 +174,8 @@ export async function POST(req: NextRequest) {
       .insert({
         session_id: sessionId ?? null,
         property_type: listing.propertyType,
-        bedrooms: listing.bedrooms ?? null,
-        bathrooms: listing.bathrooms ?? null,
-        built_up_sqft: listing.builtUpSqft ?? null,
-        land_area_sqft: listing.landAreaSqft ?? null,
-        furnishing: listing.furnishing ?? null,
-        tenure: listing.tenure ?? null,
-        asking_price_myr: listing.askingPriceMyr ?? null,
         location: listing.location,
-        highlights: listing.highlights ?? null,
+        highlights: listing.propertyDetails ?? null,
       })
       .select()
       .single();

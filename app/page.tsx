@@ -18,8 +18,6 @@ const PROPERTY_TYPES = [
   "Industrial / Warehouse",
   "Land",
 ];
-const FURNISHING_OPTIONS = ["Unfurnished", "Partially Furnished", "Fully Furnished"];
-const TENURE_OPTIONS = ["Freehold", "Leasehold (99 years)", "Leasehold (999 years)"];
 
 const FREE_LIMIT = 3;
 
@@ -227,25 +225,14 @@ export default function Home() {
 
   const [form, setForm] = useState({
     propertyType: "",
-    bedrooms: "",
-    bathrooms: "",
-    builtUpSqft: "",
-    landAreaSqft: "",
-    furnishing: "",
-    tenure: "",
-    askingPriceMyr: "",
     location: "",
-    highlights: "",
+    propertyDetails: "",
   });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GeneratedCopy | null>(null);
   const [activeLang, setActiveLang] = useState<Language>("en");
-
-  const isLanded = ["Terrace House", "Semi-Detached House", "Bungalow", "Land"].includes(
-    form.propertyType
-  );
 
   const fetchUsage = useCallback(async (sid: string) => {
     try {
@@ -292,15 +279,8 @@ export default function Home() {
       const payload = {
         sessionId,
         propertyType: form.propertyType,
-        bedrooms: form.bedrooms ? parseInt(form.bedrooms) : undefined,
-        bathrooms: form.bathrooms ? parseInt(form.bathrooms) : undefined,
-        builtUpSqft: form.builtUpSqft ? parseInt(form.builtUpSqft) : undefined,
-        landAreaSqft: form.landAreaSqft ? parseInt(form.landAreaSqft) : undefined,
-        furnishing: form.furnishing || undefined,
-        tenure: form.tenure || undefined,
-        askingPriceMyr: form.askingPriceMyr ? parseInt(form.askingPriceMyr) : undefined,
         location: form.location,
-        highlights: form.highlights || undefined,
+        propertyDetails: form.propertyDetails || undefined,
       };
 
       const res = await fetch("/api/generate", {
@@ -361,25 +341,26 @@ export default function Home() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* ── Left: Form ── */}
           <div>
-            <div className="mb-5">
-              <h2 className="text-2xl font-bold text-gray-900">Generate Listing Copy</h2>
-              <p className="text-gray-500 text-sm mt-1">
-                Fill in the property details — get ready-to-use copy in English, BM &amp; 中文 in
-                seconds.
+            <div className="mb-8">
+              <h2 className="text-3xl font-bold text-gray-900 leading-tight">
+                Stop typing.<br />Start selling.
+              </h2>
+              <p className="text-gray-500 mt-3">
+                Describe your listing in plain English — get polished copy for Facebook, WhatsApp &amp; PropertyGuru in English, BM &amp; 中文 in seconds.
               </p>
             </div>
 
-            <form onSubmit={handleGenerate} className="space-y-4">
+            <form onSubmit={handleGenerate} className="space-y-6">
               {/* Property Type */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Property Type <span className="text-red-400">*</span>
                 </label>
                 <select
                   required
                   value={form.propertyType}
                   onChange={(e) => setField("propertyType", e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
                 >
                   <option value="">Select type…</option>
                   {PROPERTY_TYPES.map((t) => (
@@ -390,7 +371,7 @@ export default function Home() {
 
               {/* Location */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Location / Area <span className="text-red-400">*</span>
                 </label>
                 <input
@@ -399,112 +380,24 @@ export default function Home() {
                   placeholder="e.g. Mont Kiara, KLCC, Petaling Jaya"
                   value={form.location}
                   onChange={(e) => setField("location", e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                 />
               </div>
 
-              {/* Beds + Baths */}
-              {form.propertyType && form.propertyType !== "Land" && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Bedrooms</label>
-                    <input
-                      type="number" min="0" max="20" placeholder="e.g. 3"
-                      value={form.bedrooms}
-                      onChange={(e) => setField("bedrooms", e.target.value)}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Bathrooms</label>
-                    <input
-                      type="number" min="0" max="20" placeholder="e.g. 2"
-                      value={form.bathrooms}
-                      onChange={(e) => setField("bathrooms", e.target.value)}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Built-up + Land area */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Built-up (sqft)</label>
-                  <input
-                    type="number" min="0" placeholder="e.g. 1200"
-                    value={form.builtUpSqft}
-                    onChange={(e) => setField("builtUpSqft", e.target.value)}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                  />
-                </div>
-                {isLanded && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Land Area (sqft)</label>
-                    <input
-                      type="number" min="0" placeholder="e.g. 2400"
-                      value={form.landAreaSqft}
-                      onChange={(e) => setField("landAreaSqft", e.target.value)}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Furnishing + Tenure */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Furnishing</label>
-                  <select
-                    value={form.furnishing}
-                    onChange={(e) => setField("furnishing", e.target.value)}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                  >
-                    <option value="">Select…</option>
-                    {FURNISHING_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Tenure</label>
-                  <select
-                    value={form.tenure}
-                    onChange={(e) => setField("tenure", e.target.value)}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                  >
-                    <option value="">Select…</option>
-                    {TENURE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {/* Asking Price */}
+              {/* Property Details */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Asking Price (RM)
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Property Details
                 </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">RM</span>
-                  <input
-                    type="number" min="0" placeholder="e.g. 650000"
-                    value={form.askingPriceMyr}
-                    onChange={(e) => setField("askingPriceMyr", e.target.value)}
-                    className="w-full border border-gray-200 rounded-lg pl-10 pr-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                  />
-                </div>
-              </div>
-
-              {/* Highlights */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Key Highlights</label>
                 <textarea
-                  rows={3}
-                  placeholder="e.g. KLCC view, pool access, near LRT station, newly renovated kitchen, pet-friendly…"
-                  value={form.highlights}
-                  onChange={(e) => setField("highlights", e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  rows={5}
+                  placeholder="e.g. 3 bed 2 bath, 1,200 sqft, RM 850,000, fully furnished, corner unit, freehold, golf view"
+                  value={form.propertyDetails}
+                  onChange={(e) => setField("propertyDetails", e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-400 leading-relaxed"
                 />
-                <p className="text-xs text-gray-400 mt-1">
-                  The more detail you give, the better the copy
+                <p className="text-xs text-gray-400 mt-2">
+                  Include anything useful — beds, baths, size, price, tenure, furnishing, views, nearby amenities. The more you add, the better the copy.
                 </p>
               </div>
 
