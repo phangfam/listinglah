@@ -89,21 +89,26 @@ function UsagePill({
     );
   }
   const remaining = Math.max(0, FREE_LIMIT - count);
-  if (remaining === 0) {
-    return (
-      <button
-        onClick={onUpgrade}
-        className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-full font-semibold transition-colors"
-      >
-        Upgrade to Pro ↗
-      </button>
-    );
-  }
-  const color = remaining === 1 ? "text-amber-600 border-amber-200 bg-amber-50" : "text-gray-500 border-gray-200 bg-white";
+  const pillColor =
+    remaining === 0
+      ? "text-red-600 border-red-200 bg-red-50"
+      : remaining === 1
+      ? "text-amber-600 border-amber-200 bg-amber-50"
+      : "text-gray-500 border-gray-200 bg-white";
   return (
-    <span className={`text-xs px-3 py-1.5 rounded-full border font-medium ${color}`}>
-      {remaining} free {remaining === 1 ? "generation" : "generations"} left
-    </span>
+    <div className="flex items-center gap-2">
+      <span className={`text-xs px-3 py-1.5 rounded-full border font-medium ${pillColor}`}>
+        {remaining} free {remaining === 1 ? "generation" : "generations"} left
+      </span>
+      {remaining === 0 && (
+        <button
+          onClick={onUpgrade}
+          className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-full font-semibold transition-colors"
+        >
+          Upgrade ↗
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -181,9 +186,9 @@ function UpgradeModal({ onClose, sessionId }: { onClose: () => void; sessionId: 
           <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <span className="text-white text-lg font-bold">✦</span>
           </div>
-          <h2 className="text-xl font-bold text-gray-900 tracking-tight">Upgrade to Pro</h2>
+          <h2 className="text-xl font-bold text-gray-900 tracking-tight">You&apos;re out of free generations!</h2>
           <p className="text-sm text-gray-500 mt-2 leading-relaxed">
-            You&apos;ve used your {FREE_LIMIT} free generations. Unlock unlimited listings across all 3 languages.
+            You&apos;ve used your {FREE_LIMIT} free generations. Upgrade to Pro for unlimited listings at RM29/month.
           </p>
         </div>
 
@@ -416,20 +421,11 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="pt-1 space-y-3">
-                {!isPaid && usageCount >= FREE_LIMIT && (
-                  <button
-                    type="button"
-                    onClick={() => setShowUpgrade(true)}
-                    className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 rounded-2xl transition-colors text-sm tracking-wide shadow-lg shadow-amber-200"
-                  >
-                    Upgrade to Pro for Unlimited ↗
-                  </button>
-                )}
+              <div className="pt-1">
                 <button
                   type="submit"
-                  disabled={loading || (!isPaid && usageCount >= FREE_LIMIT)}
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl text-[15px] tracking-wide shadow-[0_4px_20px_rgba(16,185,129,0.35)] hover:shadow-[0_6px_28px_rgba(16,185,129,0.45)] hover:-translate-y-px disabled:hover:translate-y-0 disabled:hover:shadow-[0_4px_20px_rgba(16,185,129,0.35)] transition-all duration-150"
+                  disabled={loading}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl text-[15px] tracking-wide shadow-[0_4px_20px_rgba(16,185,129,0.35)] hover:shadow-[0_6px_28px_rgba(16,185,129,0.45)] hover:-translate-y-px transition-all duration-150"
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2.5">
