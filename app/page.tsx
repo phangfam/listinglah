@@ -245,6 +245,7 @@ export default function Home() {
   const [usageCount, setUsageCount] = useState(0);
   const [isPaid, setIsPaid] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const [form, setForm] = useState({
     propertyType: "",
@@ -278,6 +279,16 @@ export default function Home() {
     }
     fetchUsage(sid);
   }, [fetchUsage]);
+
+  // Close the mobile menu on Escape for keyboard accessibility.
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenuOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   function setField(key: string, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -344,10 +355,44 @@ export default function Home() {
             </div>
             <span className="text-base font-bold text-gray-900 tracking-tight">ListingLah</span>
           </div>
+
+          {/* Desktop (md+): usage pill inline */}
           {sessionId && (
-            <UsagePill count={usageCount} isPaid={isPaid} onUpgrade={() => setShowUpgrade(true)} />
+            <div className="hidden md:block">
+              <UsagePill count={usageCount} isPaid={isPaid} onUpgrade={() => setShowUpgrade(true)} />
+            </div>
+          )}
+
+          {/* Mobile (below md): hamburger trigger */}
+          {sessionId && (
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              aria-label={menuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={menuOpen}
+              aria-controls="mobile-menu"
+              className="md:hidden inline-flex items-center justify-center w-10 h-10 -mr-2 rounded-lg text-gray-600 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-colors"
+            >
+              <svg aria-hidden="true" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                {menuOpen ? <path d="M6 6l12 12M18 6L6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
+              </svg>
+            </button>
           )}
         </div>
+
+        {/* Mobile (below md): collapsible menu panel */}
+        {sessionId && menuOpen && (
+          <div id="mobile-menu" className="md:hidden border-t border-gray-100 px-6 py-4 flex justify-end">
+            <UsagePill
+              count={usageCount}
+              isPaid={isPaid}
+              onUpgrade={() => {
+                setMenuOpen(false);
+                setShowUpgrade(true);
+              }}
+            />
+          </div>
+        )}
       </header>
 
       {/* ── Main ── */}
