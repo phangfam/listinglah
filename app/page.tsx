@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { GeneratedCopy, CopyVariants } from "./api/generate/route";
-import { FREE_LIMIT } from "@/lib/constants";
+import { FREE_LIMIT, isValidEmail } from "@/lib/constants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -55,21 +55,147 @@ const VARIANT_META: Record<
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function generateSessionId(): string {
-  return `sess_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-}
-
-function getSessionId(): string {
-  if (typeof window === "undefined") return "";
-  let id = localStorage.getItem("ll_session_id");
-  if (!id) {
-    id = generateSessionId();
-    localStorage.setItem("ll_session_id", id);
-  }
-  return id;
-}
+/**
+ * The email captured at the gate is used as the identity for usage tracking
+ * (the `sessionId` the API keys `usage_sessions` on) and remembered locally so
+ * returning visitors skip the gate. Clearing browser storage shows it again.
+ */
+const EMAIL_STORAGE_KEY = "ll_email";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+function EmailGate({ onSuccess }: { onSuccess: (email: string) => void }) {
+  const [email, setEmail] = useState("");
+  const [touched, setTouched] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const trimmed = email.trim();
+  const valid = isValidEmail(trimmed);
+  const showInvalid = touched && trimmed.length > 0 && !valid;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setTouched(true);
+    if (!valid) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
+    const normalized = trimmed.toLowerCase();
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: normalized }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Could not save your email. Please try again.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setLoading(false);
+      return;
+    }
+
+    localStorage.setItem(EMAIL_STORAGE_KEY, normalized);
+    onSuccess(normalized);
+  }
+
+  return (
+    <div className="min-h-screen bg-[#F5F4F0] flex flex-col">
+      {/* ── Header ── */}
+      <header className="bg-white/80 backdrop-blur-md border-b border-gray-100">
+        <div className="max-w-5xl mx-auto px-6 h-16 flex items-center">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-sm shadow-emerald-200">
+              <span className="text-white text-sm font-bold leading-none">✦</span>
+            </div>
+            <span className="text-base font-bold text-gray-900 tracking-tight">ListingLah</span>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Gate card ── */}
+      <main className="flex-1 flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-[0_2px_20px_rgba(0,0,0,0.06)] border border-white p-8 sm:p-10">
+          <div className="mb-8 text-center">
+            <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg shadow-emerald-200">
+              <span className="text-white text-lg font-bold leading-none">✦</span>
+            </div>
+            <p className="text-[11px] font-bold tracking-[0.15em] uppercase text-emerald-500 mb-3">
+              AI Listing Copy
+            </p>
+            <h1 className="text-[1.75rem] font-extrabold text-gray-900 leading-[1.15] tracking-tight">
+              Enter your email to start
+            </h1>
+            <p className="text-[15px] text-gray-400 mt-3 leading-relaxed">
+              Get polished property copy for Facebook, WhatsApp &amp; PropertyGuru — in English, BM &amp; 中文. Your first {FREE_LIMIT} generations are free.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            <div>
+              <label htmlFor="gate-email" className={labelClass}>
+                Email address
+              </label>
+              <input
+                id="gate-email"
+                name="email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                autoFocus
+                required
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (error) setError(null);
+                }}
+                onBlur={() => setTouched(true)}
+                aria-invalid={showInvalid || !!error}
+                aria-describedby={error || showInvalid ? "gate-email-error" : undefined}
+                className={inputClass}
+              />
+              {(showInvalid || error) && (
+                <p id="gate-email-error" role="alert" className="text-[13px] text-red-500 mt-2">
+                  {error || "Please enter a valid email address."}
+                </p>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl text-[15px] tracking-wide shadow-[0_4px_20px_rgba(16,185,129,0.35)] hover:shadow-[0_6px_28px_rgba(16,185,129,0.45)] hover:-translate-y-px transition-all duration-150"
+            >
+              {loading ? (
+                <span className="flex items-center justify-center gap-2.5">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  One moment…
+                </span>
+              ) : (
+                "Start writing →"
+              )}
+            </button>
+
+            <p className="text-center text-[11px] text-gray-400 tracking-wide leading-relaxed">
+              No password, no spam — just so we can save your free generations.
+            </p>
+          </form>
+        </div>
+      </main>
+    </div>
+  );
+}
 
 function UsagePill({
   count,
@@ -240,7 +366,9 @@ const labelClass =
   "block text-[11px] font-semibold tracking-widest uppercase text-gray-400 mb-2";
 
 export default function Home() {
+  // `sessionId` is the captured email — the identity usage is tracked against.
   const [sessionId, setSessionId] = useState("");
+  const [initializing, setInitializing] = useState(true);
   const [usageCount, setUsageCount] = useState(0);
   const [isPaid, setIsPaid] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
@@ -269,15 +397,27 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const sid = getSessionId();
-    setSessionId(sid);
+    const stored = localStorage.getItem(EMAIL_STORAGE_KEY);
     const params = new URLSearchParams(window.location.search);
     if (params.get("checkout") === "success") {
       setIsPaid(true);
       window.history.replaceState({}, "", "/");
     }
-    fetchUsage(sid);
+    if (stored && isValidEmail(stored)) {
+      setSessionId(stored);
+      fetchUsage(stored);
+    }
+    setInitializing(false);
   }, [fetchUsage]);
+
+  // Called by the email gate once a valid email is captured and stored.
+  const handleGateSuccess = useCallback(
+    (email: string) => {
+      setSessionId(email);
+      fetchUsage(email);
+    },
+    [fetchUsage]
+  );
 
   // Close the mobile menu on Escape for keyboard accessibility.
   useEffect(() => {
@@ -338,6 +478,16 @@ export default function Home() {
   }
 
   const langVariants: CopyVariants | null = result ? result[activeLang] : null;
+
+  // Avoid flashing the gate for returning visitors while we read localStorage.
+  if (initializing) {
+    return <div className="min-h-screen bg-[#F5F4F0]" />;
+  }
+
+  // No captured email yet → show the one-time email gate before the app.
+  if (!sessionId) {
+    return <EmailGate onSuccess={handleGateSuccess} />;
+  }
 
   return (
     <div className="min-h-screen bg-[#F5F4F0]">
