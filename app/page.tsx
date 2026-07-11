@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { GeneratedCopy, CopyVariants } from "./api/generate/route";
+import { FREE_LIMIT } from "@/lib/constants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -18,8 +19,6 @@ const PROPERTY_TYPES = [
   "Industrial / Warehouse",
   "Land",
 ];
-
-const FREE_LIMIT = 3;
 
 type Language = "en" | "bm" | "zh";
 type Variant = "facebook_caption" | "whatsapp_pitch" | "propertyguru_description";

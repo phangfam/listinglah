@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { jsonrepair } from "jsonrepair";
 import { createClient } from "@/lib/supabase/server";
-import { FREE_LIMIT } from "@/app/api/usage/route";
+import { FREE_LIMIT } from "@/lib/constants";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
