@@ -4,9 +4,12 @@ import { jsonrepair } from "jsonrepair";
 import { createClient } from "@/lib/supabase/server";
 import { FREE_LIMIT } from "@/lib/constants";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+// Instantiated lazily inside the handler (not at module load) so `next build`
+// can collect page data even when ANTHROPIC_API_KEY is not present in the
+// build environment.
+function getAnthropic() {
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+}
 
 export interface ListingInput {
   propertyType: string;
@@ -14,7 +17,16 @@ export interface ListingInput {
   propertyDetails?: string;
 }
 
+/** Agent contact details injected into copy when the agent opts in. */
+export interface ContactInfo {
+  name: string;
+  agencyName: string;
+  whatsappNumber: string;
+  tagline: string;
+}
+
 export interface CopyVariants {
+  headlines: string[];
   facebook_caption: string;
   whatsapp_pitch: string;
   propertyguru_description: string;
@@ -26,7 +38,23 @@ export interface GeneratedCopy {
   zh: CopyVariants;
 }
 
-function buildPrompt(listing: ListingInput): string {
+function buildContactBlock(contact?: ContactInfo | null): string {
+  if (!contact) return "";
+  const lines: string[] = [];
+  if (contact.name) lines.push(`- Agent name: ${contact.name}`);
+  if (contact.agencyName) lines.push(`- Agency: ${contact.agencyName}`);
+  if (contact.whatsappNumber) lines.push(`- WhatsApp: ${contact.whatsappNumber}`);
+  if (contact.tagline) lines.push(`- Tagline: ${contact.tagline}`);
+  if (lines.length === 0) return "";
+
+  return `
+
+AGENT CONTACT (IMPORTANT):
+End the facebook_caption, whatsapp_pitch and propertyguru_description of EVERY language with a natural, localized closing call-to-action that uses these details. For example: "Contact ${contact.name || "the agent"}${contact.whatsappNumber ? ` at ${contact.whatsappNumber}` : ""} to arrange a viewing." Weave it in naturally in each language — do not just paste English into the BM/中文 versions. Do NOT add contact details to the headlines.
+${lines.join("\n")}`;
+}
+
+function buildPrompt(listing: ListingInput, contact?: ContactInfo | null): string {
   return `You are a top-performing Malaysian property agent who also writes killer copy. You write like a real human — punchy, warm, and persuasive — never like a brochure or a robot.
 
 PROPERTY DETAILS:
@@ -35,21 +63,25 @@ PROPERTY DETAILS:
 - Details: ${listing.propertyDetails || "None provided"}
 
 Extract all relevant information from the Details field naturally — beds, baths, size, price, tenure, furnishing, views, special features, nearby amenities, etc. Use only what is present; do not invent facts not mentioned.
+${buildContactBlock(contact)}
 
-Generate listing copy in 3 languages (English, Bahasa Malaysia, Simplified Chinese) and 3 formats each. Respond ONLY with valid JSON in this exact schema:
+Generate listing copy in 3 languages (English, Bahasa Malaysia, Simplified Chinese). For each language produce 5 headline options plus 3 copy formats. Respond ONLY with valid JSON in this exact schema:
 
 {
   "en": {
+    "headlines": ["...", "...", "...", "...", "..."],
     "facebook_caption": "...",
     "whatsapp_pitch": "...",
     "propertyguru_description": "..."
   },
   "bm": {
+    "headlines": ["...", "...", "...", "...", "..."],
     "facebook_caption": "...",
     "whatsapp_pitch": "...",
     "propertyguru_description": "..."
   },
   "zh": {
+    "headlines": ["...", "...", "...", "...", "..."],
     "facebook_caption": "...",
     "whatsapp_pitch": "...",
     "propertyguru_description": "..."
@@ -57,6 +89,12 @@ Generate listing copy in 3 languages (English, Bahasa Malaysia, Simplified Chine
 }
 
 FORMAT REQUIREMENTS:
+
+headlines (array of EXACTLY 5 strings):
+- 5 DISTINCT, scroll-stopping headline options an agent can use as a post title or listing headline.
+- Each under ~12 words, punchy and specific to THIS property and location.
+- Vary the angle across the 5: e.g. lifestyle, investment upside, scarcity, location/connectivity, price-value.
+- BAN generic clichés and filler: never use "Must View", "Freehold Gem", "Value Buy", "Rare Find", "Don't Miss Out", "Hot Deal", "Dream Home", or similar empty phrases. Every headline must say something concrete.
 
 facebook_caption (150-220 words total, with emojis):
 - Line 1: A single bold emotional hook — a desire, fear, or dream the buyer has. NOT a feature list. Make it feel like it was written for one specific person scrolling their feed at 11pm. Example style: "Still paying rent while watching prices climb? This one might change that." Use the actual property and location to make it specific.
@@ -122,8 +160,15 @@ async function incrementSession(
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { sessionId, ...listingBody } = body as { sessionId?: string } & ListingInput;
-    const listing: ListingInput = listingBody;
+    const { sessionId, includeContact, ...listingBody } = body as {
+      sessionId?: string;
+      includeContact?: boolean;
+    } & ListingInput;
+    const listing: ListingInput = {
+      propertyType: listingBody.propertyType,
+      location: listingBody.location,
+      propertyDetails: listingBody.propertyDetails,
+    };
 
     if (!listing.location || !listing.propertyType) {
       return NextResponse.json(
@@ -151,10 +196,28 @@ export async function POST(req: NextRequest) {
       sessionCount = count;
     }
 
-    const message = await anthropic.messages.create({
+    // If the agent opted in, load their saved contact info to inject a CTA.
+    let contact: ContactInfo | null = null;
+    if (includeContact && sessionId) {
+      const { data: prof } = await supabase
+        .from("agent_profiles")
+        .select("name, agency_name, whatsapp_number, tagline")
+        .eq("session_id", sessionId)
+        .maybeSingle();
+      if (prof) {
+        contact = {
+          name: prof.name ?? "",
+          agencyName: prof.agency_name ?? "",
+          whatsappNumber: prof.whatsapp_number ?? "",
+          tagline: prof.tagline ?? "",
+        };
+      }
+    }
+
+    const message = await getAnthropic().messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 4096,
-      messages: [{ role: "user", content: buildPrompt(listing) }],
+      messages: [{ role: "user", content: buildPrompt(listing, contact) }],
     });
 
     const raw = message.content[0];
@@ -162,6 +225,17 @@ export async function POST(req: NextRequest) {
 
     const stripped = raw.text.replace(/^```json\n?|```$/gm, "").trim();
     const generated: GeneratedCopy = JSON.parse(jsonrepair(stripped));
+
+    // Defensively normalize headlines: ensure each language has a clean string[]
+    // (the model can occasionally omit or malform the array).
+    for (const lang of ["en", "bm", "zh"] as const) {
+      const v = generated[lang];
+      if (v) {
+        v.headlines = Array.isArray(v.headlines)
+          ? v.headlines.filter((h): h is string => typeof h === "string" && h.trim().length > 0)
+          : [];
+      }
+    }
 
     // Increment session count after successful generation
     if (sessionId) {
@@ -188,6 +262,7 @@ export async function POST(req: NextRequest) {
     const copyRows = (["en", "bm", "zh"] as const).map((lang) => ({
       listing_id: listingRow.id,
       language: lang,
+      headlines: generated[lang].headlines ?? [],
       facebook_caption: generated[lang].facebook_caption,
       whatsapp_pitch: generated[lang].whatsapp_pitch,
       propertyguru_description: generated[lang].propertyguru_description,

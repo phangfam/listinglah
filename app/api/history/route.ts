@@ -15,6 +15,7 @@ import type { GeneratedCopy, CopyVariants } from "../generate/route";
 const HISTORY_LIMIT = 10;
 
 const emptyVariants = (): CopyVariants => ({
+  headlines: [],
   facebook_caption: "",
   whatsapp_pitch: "",
   propertyguru_description: "",
@@ -38,7 +39,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await supabase
     .from("listings")
     .select(
-      "id, property_type, location, created_at, generated_copies(language, facebook_caption, whatsapp_pitch, propertyguru_description)"
+      "id, property_type, location, created_at, generated_copies(language, headlines, facebook_caption, whatsapp_pitch, propertyguru_description)"
     )
     .eq("session_id", sessionId)
     .order("created_at", { ascending: false })
@@ -63,6 +64,9 @@ export async function GET(req: NextRequest) {
         const lang = c.language as keyof GeneratedCopy;
         if (lang in generated) {
           generated[lang] = {
+            headlines: Array.isArray(c.headlines)
+              ? c.headlines.filter((h: unknown): h is string => typeof h === "string")
+              : [],
             facebook_caption: c.facebook_caption ?? "",
             whatsapp_pitch: c.whatsapp_pitch ?? "",
             propertyguru_description: c.propertyguru_description ?? "",

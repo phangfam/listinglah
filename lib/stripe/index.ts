@@ -20,7 +20,9 @@ import Stripe from "stripe";
 // valid key at runtime — this only keeps `next build` from crashing while
 // collecting page data for projects that don't use Stripe.
 export const stripe = new Stripe(
-  process.env.STRIPE_SECRET_KEY ?? "sk_test_placeholder_build_only",
+  // `||` (not `??`): `vercel env pull` writes unconfigured secrets as empty
+  // strings, and `new Stripe("")` throws — treat "" the same as unset.
+  process.env.STRIPE_SECRET_KEY || "sk_test_placeholder_build_only",
   {
     apiVersion: "2025-02-24.acacia",
     typescript: true,

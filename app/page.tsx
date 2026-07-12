@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { GeneratedCopy, CopyVariants } from "./api/generate/route";
 import type { HistoryItem } from "./api/history/route";
+import type { AgentProfile } from "./api/profile/route";
 import { FREE_LIMIT, isValidEmail } from "@/lib/constants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -23,12 +24,22 @@ const PROPERTY_TYPES = [
 
 type Language = "en" | "bm" | "zh";
 type Variant = "facebook_caption" | "whatsapp_pitch" | "propertyguru_description";
+type RefineTone = "punchier" | "formal" | "shorter";
 
-const LANG_LABELS: Record<Language, string> = {
-  en: "English",
-  bm: "BM",
-  zh: "中文",
+const LANGUAGES: Language[] = ["en", "bm", "zh"];
+const VARIANTS: Variant[] = ["facebook_caption", "whatsapp_pitch", "propertyguru_description"];
+
+const LANG_META: Record<Language, { label: string; tag: string; accent: string }> = {
+  en: { label: "English", tag: "EN", accent: "bg-blue-50 text-blue-700 border-blue-200" },
+  bm: { label: "Bahasa Malaysia", tag: "BM", accent: "bg-purple-50 text-purple-700 border-purple-200" },
+  zh: { label: "中文", tag: "ZH", accent: "bg-rose-50 text-rose-700 border-rose-200" },
 };
+
+const REFINE_OPTIONS: { tone: RefineTone; label: string }[] = [
+  { tone: "punchier", label: "Punchier" },
+  { tone: "formal", label: "More formal" },
+  { tone: "shorter", label: "Shorten" },
+];
 
 const VARIANT_META: Record<
   Variant,
@@ -62,6 +73,47 @@ const VARIANT_META: Record<
  * returning visitors skip the gate. Clearing browser storage shows it again.
  */
 const EMAIL_STORAGE_KEY = "ll_email";
+
+/** Copy text to the clipboard, with a fallback for insecure/legacy contexts. */
+async function copyToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    // Fallback for browsers/contexts without the async clipboard API.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+    } catch {
+      // give up silently — nothing else we can do
+    }
+    document.body.removeChild(ta);
+  }
+}
+
+/**
+ * Open WhatsApp with the given text pre-filled. wa.me with no phone number opens
+ * the contact/chat picker with the message ready to send — this resolves to the
+ * native app on mobile and WhatsApp Web on desktop automatically.
+ */
+function shareToWhatsApp(text: string): void {
+  const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/** Small WhatsApp glyph used on share controls. */
+function WhatsAppIcon({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38c1.45.79 3.08 1.21 4.79 1.21 5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2zm0 18.15c-1.53 0-3.03-.41-4.34-1.19l-.31-.18-3.12.82.83-3.04-.2-.32a8.2 8.2 0 01-1.26-4.36c0-4.54 3.7-8.24 8.24-8.24 4.54 0 8.24 3.7 8.24 8.24s-3.7 8.24-8.24 8.24zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.39-.12-.56.12-.16.25-.64.81-.79.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-1.99-1.23-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.02-.38.11-.51.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.41-.42-.56-.43h-.48c-.17 0-.43.06-.66.31-.23.25-.87.85-.87 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.14-1.18-.06-.11-.22-.17-.47-.29z" />
+    </svg>
+  );
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -248,59 +300,227 @@ function UsagePill({
   );
 }
 
-function CopyCard({ variant, text }: { variant: Variant; text: string }) {
+function CopyCard({
+  variant,
+  text,
+  language,
+  onRefined,
+}: {
+  variant: Variant;
+  text: string;
+  language: Language;
+  onRefined: (newText: string) => void;
+}) {
   const [copied, setCopied] = useState(false);
+  const [refining, setRefining] = useState<RefineTone | null>(null);
+  const [refineError, setRefineError] = useState<string | null>(null);
   const meta = VARIANT_META[variant];
+  const langLabel = LANG_META[language].label;
 
   async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // Fallback for browsers/contexts without the async clipboard API.
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand("copy");
-      } catch {
-        // give up silently — nothing else we can do
-      }
-      document.body.removeChild(ta);
-    }
+    await copyToClipboard(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function handleRefine(tone: RefineTone) {
+    setRefining(tone);
+    setRefineError(null);
+    try {
+      const res = await fetch("/api/regenerate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, tone, language, section: variant }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.text) throw new Error(data.error || "Couldn't refine this. Try again.");
+      onRefined(data.text);
+    } catch (err) {
+      setRefineError(err instanceof Error ? err.message : "Couldn't refine this.");
+    } finally {
+      setRefining(null);
+    }
   }
 
   return (
     <div className="relative bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${meta.stripe}`} />
-      <div className="pl-5 pr-5 pt-4 pb-4">
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div>
+      <div className="pl-5 pr-4 pt-4 pb-4">
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="min-w-0">
             <p className="text-sm font-semibold text-gray-900">
               {meta.icon}&nbsp; {meta.label}
             </p>
             <p className="text-xs text-gray-400 mt-0.5">{meta.desc}</p>
           </div>
-          <button
-            type="button"
-            onClick={handleCopy}
-            aria-label={copied ? `${meta.label} copy copied to clipboard` : `Copy ${meta.label} copy to clipboard`}
-            className={`shrink-0 text-xs px-3 py-1.5 rounded-lg font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-emerald-400 ${
-              copied
-                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200 border border-transparent"
-            }`}
-          >
-            <span aria-live="polite">{copied ? "✓ Copied!" : "Copy"}</span>
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handleCopy}
+              aria-label={
+                copied
+                  ? `${meta.label} ${langLabel} copy copied to clipboard`
+                  : `Copy ${meta.label} ${langLabel} copy to clipboard`
+              }
+              className={`text-xs px-2.5 py-1.5 rounded-lg font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-emerald-400 ${
+                copied
+                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200 border border-transparent"
+              }`}
+            >
+              <span aria-live="polite">{copied ? "✓ Copied!" : "Copy"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => shareToWhatsApp(text)}
+              aria-label={`Share ${meta.label} ${langLabel} copy to WhatsApp`}
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg font-semibold bg-[#25D366]/10 text-[#128C7E] hover:bg-[#25D366]/20 border border-transparent transition-all focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            >
+              <WhatsAppIcon />
+              Share
+            </button>
+          </div>
         </div>
-        <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed">{text}</p>
+
+        <div className="relative">
+          <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed">{text}</p>
+          {refining && (
+            <div className="absolute inset-0 -m-1 bg-white/70 backdrop-blur-[1px] rounded-lg flex items-center justify-center">
+              <span className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-600">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+                Refining…
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Lightweight per-section refine — does NOT use a free generation. */}
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-gray-50 pt-3">
+          <span className="text-[11px] font-semibold text-gray-400 mr-0.5">✨ Refine:</span>
+          {REFINE_OPTIONS.map((opt) => (
+            <button
+              key={opt.tone}
+              type="button"
+              disabled={!!refining}
+              onClick={() => handleRefine(opt.tone)}
+              className="text-[11px] px-2 py-1 rounded-md font-medium text-gray-600 bg-gray-50 hover:bg-emerald-50 hover:text-emerald-700 border border-gray-100 hover:border-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {refineError && (
+          <p role="alert" className="text-[11px] text-red-500 mt-1.5">
+            {refineError}
+          </p>
+        )}
       </div>
     </div>
+  );
+}
+
+function HeadlineList({ headlines, language }: { headlines: string[]; language: Language }) {
+  const [picked, setPicked] = useState<number | null>(null);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const langLabel = LANG_META[language].label;
+
+  if (!headlines || headlines.length === 0) return null;
+
+  async function handleCopy(idx: number, text: string) {
+    await copyToClipboard(text);
+    setCopiedIdx(idx);
+    setTimeout(() => setCopiedIdx((c) => (c === idx ? null : c)), 2000);
+  }
+
+  return (
+    <div className="bg-gray-50/70 border border-gray-100 rounded-2xl p-3.5">
+      <p className="text-[11px] font-bold tracking-wider uppercase text-gray-400 mb-2.5">
+        ✦ Headline options
+      </p>
+      <ul className="space-y-1.5">
+        {headlines.map((h, i) => {
+          const isPicked = picked === i;
+          return (
+            <li
+              key={i}
+              className={`group flex items-start gap-2 rounded-xl border px-2.5 py-2 transition-colors ${
+                isPicked ? "bg-amber-50 border-amber-200" : "bg-white border-gray-100"
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setPicked(isPicked ? null : i)}
+                aria-label={isPicked ? `Unpick headline ${i + 1}` : `Pick headline ${i + 1} as favourite`}
+                aria-pressed={isPicked}
+                className={`shrink-0 mt-0.5 text-sm leading-none focus:outline-none focus:ring-2 focus:ring-amber-400 rounded ${
+                  isPicked ? "text-amber-500" : "text-gray-300 hover:text-amber-400"
+                }`}
+              >
+                {isPicked ? "★" : "☆"}
+              </button>
+              <span className="flex-1 text-[13px] text-gray-700 leading-snug">{h}</span>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleCopy(i, h)}
+                  aria-label={copiedIdx === i ? "Headline copied" : `Copy headline ${i + 1}`}
+                  className="text-[11px] px-1.5 py-0.5 rounded font-semibold text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-colors"
+                >
+                  <span aria-live="polite">{copiedIdx === i ? "✓" : "Copy"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => shareToWhatsApp(h)}
+                  aria-label={`Share headline ${i + 1} to WhatsApp — ${langLabel}`}
+                  className="p-1 rounded text-[#128C7E] hover:bg-[#25D366]/15 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-colors"
+                >
+                  <WhatsAppIcon className="w-3 h-3" />
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function LanguageColumn({
+  language,
+  variants,
+  onRefined,
+}: {
+  language: Language;
+  variants: CopyVariants;
+  onRefined: (section: Variant, text: string) => void;
+}) {
+  const meta = LANG_META[language];
+  return (
+    <section aria-label={`${meta.label} copy`} className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <span
+          className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border ${meta.accent}`}
+        >
+          {meta.tag}
+        </span>
+        <span className="text-sm font-semibold text-gray-700">{meta.label}</span>
+      </div>
+      <HeadlineList headlines={variants.headlines} language={language} />
+      <div className="flex flex-col gap-3">
+        {VARIANTS.map((v) => (
+          <CopyCard
+            key={v}
+            variant={v}
+            text={variants[v]}
+            language={language}
+            onRefined={(t) => onRefined(v, t)}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -380,6 +600,166 @@ function UpgradeModal({ onClose, sessionId }: { onClose: () => void; sessionId: 
         >
           Maybe later
         </button>
+      </div>
+    </div>
+  );
+}
+
+function ProfileModal({
+  sessionId,
+  initial,
+  onClose,
+  onSaved,
+}: {
+  sessionId: string;
+  initial: AgentProfile;
+  onClose: () => void;
+  onSaved: (profile: AgentProfile) => void;
+}) {
+  const [form, setForm] = useState<AgentProfile>(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function setField(key: keyof AgentProfile, value: string) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, ...form }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not save your profile.");
+      onSaved(data.profile ?? form);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="profile-title"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 px-6 pt-6 pb-4 border-b border-gray-100">
+          <div>
+            <h2 id="profile-title" className="text-lg font-bold text-gray-900 tracking-tight">
+              Your Agent Profile
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">
+              Add your details once — turn on &ldquo;Add my contact info&rdquo; when generating to
+              weave a viewing CTA into your copy.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close profile"
+            className="shrink-0 -mr-1 -mt-1 w-9 h-9 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-colors flex items-center justify-center"
+          >
+            <svg aria-hidden="true" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+
+        <form onSubmit={handleSave} className="overflow-y-auto px-6 py-5 space-y-4">
+          <div>
+            <label htmlFor="pf-name" className={labelClass}>Name</label>
+            <input
+              id="pf-name"
+              type="text"
+              autoComplete="name"
+              placeholder="e.g. Sarah Tan"
+              value={form.name}
+              onChange={(e) => setField("name", e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="pf-agency" className={labelClass}>Agency Name</label>
+            <input
+              id="pf-agency"
+              type="text"
+              placeholder="e.g. IQI Realty"
+              value={form.agencyName}
+              onChange={(e) => setField("agencyName", e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="pf-whatsapp" className={labelClass}>WhatsApp Number</label>
+            <input
+              id="pf-whatsapp"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="e.g. +60 12-345 6789"
+              value={form.whatsappNumber}
+              onChange={(e) => setField("whatsappNumber", e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="pf-tagline" className={labelClass}>
+              Tagline <span className="text-gray-300 normal-case tracking-normal">(optional)</span>
+            </label>
+            <input
+              id="pf-tagline"
+              type="text"
+              placeholder="e.g. Your Mont Kiara specialist"
+              value={form.tagline}
+              onChange={(e) => setField("tagline", e.target.value)}
+              className={inputClass}
+            />
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-100 text-red-600 text-sm rounded-xl px-4 py-3">
+              {error}
+            </div>
+          )}
+
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 disabled:opacity-60 text-white font-bold py-3 rounded-2xl text-sm tracking-wide shadow-lg shadow-emerald-200 transition-colors"
+            >
+              {saving ? "Saving…" : "Save profile"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-sm text-gray-400 hover:text-gray-600 transition-colors px-2"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
@@ -519,11 +899,15 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GeneratedCopy | null>(null);
-  const [activeLang, setActiveLang] = useState<Language>("en");
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+
+  const [profile, setProfile] = useState<AgentProfile | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
+  // Whether to weave the saved contact CTA into this generation's copy.
+  const [includeContact, setIncludeContact] = useState(true);
 
   const fetchUsage = useCallback(async (sid: string) => {
     try {
@@ -550,6 +934,17 @@ export default function Home() {
     }
   }, []);
 
+  const fetchProfile = useCallback(async (sid: string) => {
+    if (!sid) return;
+    try {
+      const res = await fetch(`/api/profile?sessionId=${encodeURIComponent(sid)}`);
+      const data = await res.json();
+      setProfile(data.profile ?? null);
+    } catch {
+      // non-fatal — profile is optional
+    }
+  }, []);
+
   useEffect(() => {
     const stored = localStorage.getItem(EMAIL_STORAGE_KEY);
     const params = new URLSearchParams(window.location.search);
@@ -561,9 +956,10 @@ export default function Home() {
       setSessionId(stored);
       fetchUsage(stored);
       fetchHistory(stored);
+      fetchProfile(stored);
     }
     setInitializing(false);
-  }, [fetchUsage, fetchHistory]);
+  }, [fetchUsage, fetchHistory, fetchProfile]);
 
   // Called by the email gate once a valid email is captured and stored.
   const handleGateSuccess = useCallback(
@@ -571,9 +967,13 @@ export default function Home() {
       setSessionId(email);
       fetchUsage(email);
       fetchHistory(email);
+      fetchProfile(email);
     },
-    [fetchUsage, fetchHistory]
+    [fetchUsage, fetchHistory, fetchProfile]
   );
+
+  // Does the saved profile carry anything worth injecting as a contact CTA?
+  const profileHasContact = !!(profile && (profile.name || profile.whatsappNumber));
 
   function openHistory() {
     setMenuOpen(false);
@@ -581,13 +981,24 @@ export default function Home() {
     fetchHistory(sessionId); // refresh on open
   }
 
+  function openProfile() {
+    setMenuOpen(false);
+    setShowProfile(true);
+  }
+
   // Load a past generation back into the results view (no new generation).
   function handleSelectHistory(item: HistoryItem) {
     setResult(item.generated);
-    setActiveLang("en");
     setError(null);
     setShowHistory(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // Replace a single variant's text in place after a lightweight refine.
+  function updateVariant(lang: Language, section: Variant, text: string) {
+    setResult((prev) =>
+      prev ? { ...prev, [lang]: { ...prev[lang], [section]: text } } : prev
+    );
   }
 
   // Close the mobile menu on Escape for keyboard accessibility.
@@ -622,6 +1033,7 @@ export default function Home() {
         propertyType: form.propertyType,
         location: form.location,
         propertyDetails: form.propertyDetails || undefined,
+        includeContact: includeContact && profileHasContact,
       };
 
       const res = await fetch("/api/generate", {
@@ -649,8 +1061,6 @@ export default function Home() {
     }
   }
 
-  const langVariants: CopyVariants | null = result ? result[activeLang] : null;
-
   // Avoid flashing the gate for returning visitors while we read localStorage.
   if (initializing) {
     return <div className="min-h-screen bg-[#F5F4F0]" />;
@@ -676,9 +1086,18 @@ export default function Home() {
         />
       )}
 
+      {showProfile && (
+        <ProfileModal
+          sessionId={sessionId}
+          initial={profile ?? { name: "", agencyName: "", whatsappNumber: "", tagline: "" }}
+          onClose={() => setShowProfile(false)}
+          onSaved={(p) => setProfile(p)}
+        />
+      )}
+
       {/* ── Header ── */}
       <header className="bg-white/80 backdrop-blur-md border-b border-gray-100 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-sm shadow-emerald-200">
               <span className="text-white text-sm font-bold leading-none">✦</span>
@@ -686,9 +1105,20 @@ export default function Home() {
             <span className="text-base font-bold text-gray-900 tracking-tight">ListingLah</span>
           </div>
 
-          {/* Desktop (md+): Recent listings + usage pill inline */}
+          {/* Desktop (md+): Profile + Recent listings + usage pill inline */}
           {sessionId && (
             <div className="hidden md:flex items-center gap-3">
+              <button
+                type="button"
+                onClick={openProfile}
+                className="text-xs px-3 py-1.5 rounded-full border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-800 font-medium inline-flex items-center gap-1.5 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400"
+              >
+                <svg aria-hidden="true" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" />
+                </svg>
+                {profileHasContact ? "Edit Profile" : "Add Profile"}
+              </button>
               <button
                 type="button"
                 onClick={openHistory}
@@ -726,6 +1156,17 @@ export default function Home() {
           <div id="mobile-menu" className="md:hidden border-t border-gray-100 px-6 py-4 flex flex-col items-end gap-3">
             <button
               type="button"
+              onClick={openProfile}
+              className="text-xs px-3 py-1.5 rounded-full border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-800 font-medium inline-flex items-center gap-1.5 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            >
+              <svg aria-hidden="true" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="8" r="4" />
+                <path d="M4 20c0-4 4-6 8-6s8 2 8 6" />
+              </svg>
+              {profileHasContact ? "Edit Profile" : "Add Profile"}
+            </button>
+            <button
+              type="button"
               onClick={openHistory}
               className="text-xs px-3 py-1.5 rounded-full border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-800 font-medium inline-flex items-center gap-1.5 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400"
             >
@@ -748,11 +1189,11 @@ export default function Home() {
       </header>
 
       {/* ── Main ── */}
-      <main className="max-w-5xl mx-auto px-6 py-12">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.1fr] gap-6 items-start">
+      <main className="max-w-7xl mx-auto px-6 py-12">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(340px,380px)_1fr] gap-6 items-start">
 
           {/* ── Left: Form card ── */}
-          <div className="bg-white rounded-3xl shadow-[0_2px_20px_rgba(0,0,0,0.06)] border border-white p-8 lg:p-10">
+          <div className="bg-white rounded-3xl shadow-[0_2px_20px_rgba(0,0,0,0.06)] border border-white p-8 lg:p-9 lg:sticky lg:top-24">
             <div className="mb-9">
               <p className="text-[11px] font-bold tracking-[0.15em] uppercase text-emerald-500 mb-3">
                 AI Listing Copy
@@ -812,6 +1253,32 @@ export default function Home() {
                 </p>
               </div>
 
+              {/* Contact CTA toggle — only meaningful once a profile exists. */}
+              {profileHasContact ? (
+                <label className="flex items-start gap-3 rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeContact}
+                    onChange={(e) => setIncludeContact(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-500 focus:ring-emerald-400 accent-emerald-500"
+                  />
+                  <span className="text-[13px] text-gray-600 leading-snug">
+                    <span className="font-semibold text-gray-700">Add my contact info</span> to the copy
+                    <span className="block text-[11px] text-gray-400 mt-0.5">
+                      Weaves a viewing CTA with your name &amp; WhatsApp into each variant.
+                    </span>
+                  </span>
+                </label>
+              ) : (
+                <button
+                  type="button"
+                  onClick={openProfile}
+                  className="w-full text-left rounded-xl border border-dashed border-gray-200 bg-gray-50/50 px-4 py-3 text-[13px] text-gray-500 hover:border-emerald-300 hover:text-emerald-700 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                >
+                  <span className="font-semibold">+ Add your agent profile</span> to auto-insert a contact CTA into your copy.
+                </button>
+              )}
+
               {error && (
                 <div className="bg-red-50 border border-red-100 text-red-600 text-sm rounded-xl px-4 py-3">
                   {error}
@@ -837,7 +1304,7 @@ export default function Home() {
                   )}
                 </button>
                 <p className="text-center text-[11px] text-gray-400 tracking-wide">
-                  9 copy variants &nbsp;·&nbsp; 3 languages &nbsp;·&nbsp; ready in ~10 seconds
+                  5 headlines + 9 copy variants &nbsp;·&nbsp; 3 languages &nbsp;·&nbsp; ready in ~15 seconds
                 </p>
               </div>
             </form>
@@ -880,47 +1347,34 @@ export default function Home() {
               </div>
             )}
 
-            {result && langVariants && (
+            {result && (
               <div className="flex flex-col gap-5">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="text-base font-bold text-gray-900 tracking-tight">Generated Copy</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">Click any card to copy the text</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      All three languages side by side — copy, share, or refine any part.
+                    </p>
                   </div>
+                  <button
+                    onClick={() => setResult(null)}
+                    className="text-xs px-3 py-1.5 rounded-full border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700 font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  >
+                    ← New listing
+                  </button>
                 </div>
 
-                {/* Language tabs */}
-                <div className="flex gap-2 bg-gray-50 p-1 rounded-xl w-fit">
-                  {(["en", "bm", "zh"] as Language[]).map((lang) => (
-                    <button
+                {/* Side-by-side on wide screens; stacks vertically on smaller ones. */}
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+                  {LANGUAGES.map((lang) => (
+                    <LanguageColumn
                       key={lang}
-                      onClick={() => setActiveLang(lang)}
-                      className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                        activeLang === lang
-                          ? "bg-white text-gray-900 shadow-sm"
-                          : "text-gray-400 hover:text-gray-600"
-                      }`}
-                    >
-                      {LANG_LABELS[lang]}
-                    </button>
+                      language={lang}
+                      variants={result[lang]}
+                      onRefined={(section, text) => updateVariant(lang, section, text)}
+                    />
                   ))}
                 </div>
-
-                {/* Copy cards */}
-                <div className="space-y-3">
-                  {(
-                    ["facebook_caption", "whatsapp_pitch", "propertyguru_description"] as Variant[]
-                  ).map((v) => (
-                    <CopyCard key={`${activeLang}-${v}`} variant={v} text={langVariants[v]} />
-                  ))}
-                </div>
-
-                <button
-                  onClick={() => setResult(null)}
-                  className="text-sm text-gray-300 hover:text-gray-500 transition-colors self-start mt-1"
-                >
-                  ← Generate for another listing
-                </button>
               </div>
             )}
           </div>
