@@ -135,9 +135,12 @@ async function getOrCreateSession(
     .maybeSingle();
 
   if (!data) {
-    await supabase
+    const { error } = await supabase
       .from("usage_sessions")
       .insert({ id: sessionId, generation_count: 0, is_paid: false });
+    if (error) {
+      console.error(`[api/generate] Failed to create usage session ${sessionId}:`, error.message);
+    }
     return { count: 0, isPaid: false };
   }
   return { count: data.generation_count, isPaid: data.is_paid };
@@ -148,13 +151,16 @@ async function incrementSession(
   sessionId: string,
   currentCount: number
 ) {
-  await supabase
+  const { error } = await supabase
     .from("usage_sessions")
     .update({
       generation_count: currentCount + 1,
       updated_at: new Date().toISOString(),
     })
     .eq("id", sessionId);
+  if (error) {
+    console.error(`[api/generate] Failed to increment usage session ${sessionId}:`, error.message);
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -199,11 +205,14 @@ export async function POST(req: NextRequest) {
     // If the agent opted in, load their saved contact info to inject a CTA.
     let contact: ContactInfo | null = null;
     if (includeContact && sessionId) {
-      const { data: prof } = await supabase
+      const { data: prof, error: profErr } = await supabase
         .from("agent_profiles")
         .select("name, agency_name, whatsapp_number, tagline")
         .eq("session_id", sessionId)
         .maybeSingle();
+      if (profErr) {
+        console.error(`[api/generate] Failed to load agent profile ${sessionId}:`, profErr.message);
+      }
       if (prof) {
         contact = {
           name: prof.name ?? "",
@@ -255,7 +264,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (listingErr) {
-      console.error("Failed to save listing:", listingErr.message);
+      console.error("[api/generate] Failed to save listing:", listingErr.message);
       return NextResponse.json({ generated });
     }
 
@@ -268,7 +277,16 @@ export async function POST(req: NextRequest) {
       propertyguru_description: generated[lang].propertyguru_description,
     }));
 
-    await supabase.from("generated_copies").insert(copyRows);
+    // Persistence failures here don't fail the request (the user still gets
+    // their copy), but they MUST be logged — a silent failure previously hid
+    // the fact that generated_copies didn't exist, leaving history empty.
+    const { error: copiesErr } = await supabase.from("generated_copies").insert(copyRows);
+    if (copiesErr) {
+      console.error(
+        `[api/generate] Failed to save generated_copies for listing ${listingRow.id}:`,
+        copiesErr.message
+      );
+    }
 
     return NextResponse.json({ generated, listingId: listingRow.id });
   } catch (err) {
