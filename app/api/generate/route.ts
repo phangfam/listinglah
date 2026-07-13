@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { jsonrepair } from "jsonrepair";
 import { createClient } from "@/lib/supabase/server";
 import { FREE_LIMIT } from "@/lib/constants";
 
@@ -38,6 +37,44 @@ export interface GeneratedCopy {
   zh: CopyVariants;
 }
 
+// Strict tool schema — the model returns the copy as a validated tool call
+// instead of free-form JSON text. This guarantees the input parses (the SDK
+// hands back `tool_use.input` already parsed) and eliminates the class of
+// JSON-parse failures that free-text output produced (unescaped quotes,
+// literal newlines, stray commas). `strict: true` requires additionalProperties
+// false + every property in `required` on each object.
+const LANG_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    headlines: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Exactly 5 distinct, cliché-free hook-style headline options for this listing.",
+    },
+    facebook_caption: { type: "string" },
+    whatsapp_pitch: { type: "string" },
+    propertyguru_description: { type: "string" },
+  },
+  required: ["headlines", "facebook_caption", "whatsapp_pitch", "propertyguru_description"],
+} as const;
+
+const LISTING_TOOL: Anthropic.Tool = {
+  name: "emit_listing_copy",
+  description:
+    "Return the generated property listing copy in all three languages (en, bm, zh), each with 5 headlines and the 3 copy formats.",
+  // `strict` is a top-level tool field (GA, no beta) that guarantees the input validates.
+  strict: true,
+  input_schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: { en: LANG_SCHEMA, bm: LANG_SCHEMA, zh: LANG_SCHEMA },
+    required: ["en", "bm", "zh"],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any,
+};
+
 function buildContactBlock(contact?: ContactInfo | null): string {
   if (!contact) return "";
   const lines: string[] = [];
@@ -65,28 +102,7 @@ PROPERTY DETAILS:
 Extract all relevant information from the Details field naturally — beds, baths, size, price, tenure, furnishing, views, special features, nearby amenities, etc. Use only what is present; do not invent facts not mentioned.
 ${buildContactBlock(contact)}
 
-Generate listing copy in 3 languages (English, Bahasa Malaysia, Simplified Chinese). For each language produce 5 headline options plus 3 copy formats. Respond ONLY with valid JSON in this exact schema:
-
-{
-  "en": {
-    "headlines": ["...", "...", "...", "...", "..."],
-    "facebook_caption": "...",
-    "whatsapp_pitch": "...",
-    "propertyguru_description": "..."
-  },
-  "bm": {
-    "headlines": ["...", "...", "...", "...", "..."],
-    "facebook_caption": "...",
-    "whatsapp_pitch": "...",
-    "propertyguru_description": "..."
-  },
-  "zh": {
-    "headlines": ["...", "...", "...", "...", "..."],
-    "facebook_caption": "...",
-    "whatsapp_pitch": "...",
-    "propertyguru_description": "..."
-  }
-}
+Generate listing copy in 3 languages (English = en, Bahasa Malaysia = bm, Simplified Chinese = zh). For each language produce EXACTLY 5 headline options plus the 3 copy formats, and return everything by calling the emit_listing_copy tool. Do not reply with prose — use the tool.
 
 FORMAT REQUIREMENTS:
 
@@ -118,10 +134,7 @@ LANGUAGE NOTES:
 - Bahasa Malaysia (bm): Conversational Malaysian BM as used in property ads and agent WhatsApp groups — warm but credible. Avoid stiff textbook BM.
 - Simplified Chinese (zh): Write as a Malaysian Chinese agent would — mix of genuine warmth and practical value-focus. Use 简体字. Avoid overly formal or mainland-government tone. The WhatsApp pitch should feel like a WeChat message from someone you trust.
 
-CRITICAL JSON RULES (the output must parse with JSON.parse):
-- All line breaks within copy text MUST be represented as the two-character sequence \\n — never a literal newline character inside a JSON string value.
-- Never use unescaped double-quote characters inside string values — use a single apostrophe instead (e.g. you're, it's, don't).
-- Output raw JSON only — no markdown fences, no commentary before or after.`;
+Line breaks inside copy are fine — put real newlines between paragraphs. Return the result by calling emit_listing_copy.`;
 }
 
 async function getOrCreateSession(
@@ -226,14 +239,19 @@ export async function POST(req: NextRequest) {
     const message = await getAnthropic().messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 4096,
+      tools: [LISTING_TOOL],
+      tool_choice: { type: "tool", name: LISTING_TOOL.name },
       messages: [{ role: "user", content: buildPrompt(listing, contact) }],
     });
 
-    const raw = message.content[0];
-    if (raw.type !== "text") throw new Error("Unexpected response type from Claude");
-
-    const stripped = raw.text.replace(/^```json\n?|```$/gm, "").trim();
-    const generated: GeneratedCopy = JSON.parse(jsonrepair(stripped));
+    // With a forced tool_choice, Claude returns the copy as a tool_use block
+    // whose `input` the SDK has already parsed and the API validated against
+    // LISTING_TOOL's schema — no manual JSON parsing / repair needed.
+    const toolUse = message.content.find((b) => b.type === "tool_use");
+    if (!toolUse || toolUse.type !== "tool_use") {
+      throw new Error("Model did not return listing copy");
+    }
+    const generated = toolUse.input as GeneratedCopy;
 
     // Defensively normalize headlines: ensure each language has a clean string[]
     // (the model can occasionally omit or malform the array).
